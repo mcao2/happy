@@ -447,12 +447,16 @@ export class TmuxUtilities {
             // Non-send-keys commands
             const fullCmd = [...baseCmd, ...cmd];
 
-            // Add target specification for commands that support it
+            // Add target specification for commands that support it.
+            // Insert immediately after the tmux subcommand so -t comes BEFORE
+            // any shell command; placing it after the shell command makes tmux
+            // treat -t as part of the command string.
             if (cmd.length > 0 && COMMANDS_SUPPORTING_TARGET.has(cmd[0])) {
                 let target = targetSession;
                 if (window) target += `:${window}`;
                 if (pane) target += `.${pane}`;
-                fullCmd.push('-t', target);
+                // baseCmd is ['tmux'] (or ['tmux','-S',socket]), cmd[0] starts at baseCmd.length
+                fullCmd.splice(baseCmd.length + 1, 0, '-t', target);
             }
 
             return this.executeCommand(fullCmd);
@@ -787,7 +791,10 @@ export class TmuxUtilities {
 
             // Create new window in session with command and environment variables
             // IMPORTANT: Don't manually add -t here - executeTmuxCommand handles it via parameters
-            const createWindowArgs = ['new-window', '-n', windowName];
+            // -d: don't switch to the new window. Critical when there's no
+            // attached client (the session was created detached); without -d
+            // tmux closes the pane immediately after creation.
+            const createWindowArgs = ['new-window', '-d', '-n', windowName];
 
             // Add working directory if specified
             if (options.cwd) {
@@ -812,25 +819,22 @@ export class TmuxUtilities {
                         continue;
                     }
 
-                    // Escape value for shell safety
-                    // Must escape: backslashes, double quotes, dollar signs, backticks
-                    const escapedValue = value
-                        .replace(/\\/g, '\\\\')   // Backslash first!
-                        .replace(/"/g, '\\"')     // Double quotes
-                        .replace(/\$/g, '\\$')    // Dollar signs
-                        .replace(/`/g, '\\`');    // Backticks
-
-                    createWindowArgs.push('-e', `${key}="${escapedValue}"`);
+                    // Pass the value verbatim.  tmux -e expects VAR=value and
+                    // parses everything after the first = as the value.  Since we
+                    // invoke tmux via child_process.spawn (not a shell) each array
+                    // element is a single argv entry, so spaces and special chars
+                    // are preserved without quoting.
+                    createWindowArgs.push('-e', `${key}=${value}`);
                 }
                 logger.debug(`[TMUX] Setting ${Object.keys(env).length} environment variables in tmux window`);
             }
 
+            // Add -P and -F flags BEFORE the command so tmux consumes them
+            // as new-window flags, not as part of the shell command.
+            createWindowArgs.push('-P', '-F', '#{pane_pid}');
+
             // Add the command to run in the window (runs immediately when window is created)
             createWindowArgs.push(fullCommand);
-
-            // Add -P flag to print the pane PID immediately
-            createWindowArgs.push('-P');
-            createWindowArgs.push('-F', '#{pane_pid}');
 
             // Create window with command and get PID immediately
             const createResult = await this.executeTmuxCommand(createWindowArgs, sessionName);

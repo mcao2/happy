@@ -36,6 +36,17 @@ function shellescape(s: string): string {
     return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
+/**
+ * Resolve the agent to spawn. Maps legacy 'claude' requests to 'pi' for
+ * new sessions, but preserves 'claude' for fork/duplicate flows that
+ * need JSONL backfill (resumeClaudeSessionId).
+ */
+function resolveAgent(requestedAgent: string | undefined, hasResumeClaudeSessionId: boolean): string {
+  if (hasResumeClaudeSessionId) return 'claude';
+  if (requestedAgent === 'pi' || requestedAgent === 'claude' || requestedAgent === undefined) return 'pi';
+  return requestedAgent;
+}
+
 // Prepare initial metadata
 // Suffix host with `-dev` for the HAPPY_VARIANT=dev variant so the dev daemon
 // is visually distinct from the stable one in the machine list (they otherwise
@@ -335,6 +346,13 @@ export async function startDaemon(): Promise<void> {
           };
         }
 
+        // Resolve agent once. Alias claude → pi for new sessions only;
+        // fork/duplicate sends resumeClaudeSessionId which needs claude.
+        const agent = resolveAgent(options.agent, !!options.resumeClaudeSessionId);
+        const resumeFragment = options.resumeClaudeSessionId && agent === 'claude'
+          ? ` --resume ${shellescape(options.resumeClaudeSessionId)}`
+          : '';
+
         // Check if tmux is available and should be used
         const tmuxAvailable = await isTmuxAvailable();
         let useTmux = tmuxAvailable;
@@ -352,6 +370,13 @@ export async function startDaemon(): Promise<void> {
           }
         }
 
+        // Pi always needs a TTY for extension initialization, so force tmux
+        // when available. This overrides the normal session-name check.
+        if (agent === 'pi' && tmuxAvailable) {
+          useTmux = true;
+          tmuxSessionName = process.env.TMUX ? '' : 'happy-pi';
+        }
+
         if (useTmux && tmuxSessionName !== undefined) {
           // Try to spawn in tmux session
           const sessionDesc = tmuxSessionName || 'current/most recent session';
@@ -361,14 +386,11 @@ export async function startDaemon(): Promise<void> {
 
           // Construct command for the CLI
           const cliPath = join(projectPath(), 'dist', 'index.mjs');
-          // Determine agent command - support claude, codex, gemini, openclaw, and pi
-          const agent = options.agent === 'pi' ? 'pi' : (options.agent === 'gemini' ? 'gemini' : (options.agent === 'codex' ? 'codex' : (options.agent === 'openclaw' ? 'openclaw' : 'claude')));
-          // Restrict resume to Claude — Codex/Gemini don't honour the
-          // happy-pass-through `--resume <id>` argument the same way.
-          const resumeFragment = options.resumeClaudeSessionId && agent === 'claude'
-            ? ` --resume ${shellescape(options.resumeClaudeSessionId)}`
-            : '';
-          const fullCommand = `node --no-warnings --no-deprecation ${cliPath} ${agent} --happy-starting-mode remote --started-by daemon${resumeFragment}`;
+          // When spawning pi, bypass the `happy pi` wrapper and run pi
+          // directly so the daemon PID tracking matches the webhook PID.
+          const fullCommand = agent === 'pi'
+            ? `bash -lc 'exec pi'`
+            : `node --no-warnings --no-deprecation ${cliPath} ${agent} --happy-starting-mode remote --started-by daemon${resumeFragment}`;
 
           // Spawn in tmux with environment variables
           // IMPORTANT: Pass complete environment (process.env + extraEnv) because:
@@ -376,7 +398,16 @@ export async function startDaemon(): Promise<void> {
           // 2. Regular spawn uses env: { ...process.env, ...extraEnv }
           // 3. tmux needs explicit environment via -e flags to ensure all variables are available
           const windowName = `happy-${Date.now()}-${agent}`;
-          const tmuxEnv: Record<string, string> = {};
+          const tmuxEnv: Record<string, string> = {
+            // Force kimi-k2.6 regardless of what the stale iOS client sends
+            PI_MODEL: 'kimi-k2.6',
+            HAPPY_STARTED_BY: 'daemon',
+          };
+
+          // Always pass HAPPY_HOME_DIR so pi-happy can find daemon.state.json
+          if (process.env.HAPPY_HOME_DIR) {
+            tmuxEnv.HAPPY_HOME_DIR = process.env.HAPPY_HOME_DIR;
+          }
 
           // Add all daemon environment variables (filtering out undefined)
           for (const [key, value] of Object.entries(process.env)) {
@@ -394,13 +425,24 @@ export async function startDaemon(): Promise<void> {
             cwd: directory
           }, tmuxEnv);  // Pass complete environment for tmux session
 
-          if (tmuxResult.success) {
-            logger.debug(`[DAEMON RUN] Successfully spawned in tmux session: ${tmuxResult.sessionId}, PID: ${tmuxResult.pid}`);
+          if (!tmuxResult.success) {
+            const err = `Failed to spawn ${agent} in tmux: ${tmuxResult.error}`;
+            if (agent === 'pi') {
+              // pi is a TUI and needs a PTY; without tmux it cannot initialize.
+              logger.debug(`[DAEMON RUN] ${err}. pi requires tmux.`);
+              return { type: 'error', errorMessage: err };
+            }
+            logger.debug(`[DAEMON RUN] ${err}, falling back to regular spawning`);
+            useTmux = false;
+          }
 
+          if (useTmux) {
             // Validate we got a PID from tmux
             if (!tmuxResult.pid) {
-              throw new Error('Tmux window created but no PID returned');
+              return { type: 'error', errorMessage: 'Tmux window created but no PID returned' };
             }
+
+            logger.debug(`[DAEMON RUN] Successfully spawned in tmux session: ${tmuxResult.sessionId}, PID: ${tmuxResult.pid}`);
 
             // Create a tracked session for tmux windows - now we have the real PID!
             const trackedSession: TrackedSession = {
@@ -440,9 +482,6 @@ export async function startDaemon(): Promise<void> {
                 });
               });
             });
-          } else {
-            logger.debug(`[DAEMON RUN] Failed to spawn in tmux: ${tmuxResult.error}, falling back to regular spawning`);
-            useTmux = false;
           }
         }
 
@@ -450,33 +489,14 @@ export async function startDaemon(): Promise<void> {
         if (!useTmux) {
           logger.debug(`[DAEMON RUN] Using regular process spawning`);
 
-          // Construct arguments for the CLI - support claude, codex, gemini, openclaw, and pi
-          let agentCommand: string;
-          switch (options.agent) {
-            case 'claude':
-            case undefined:
-              agentCommand = 'claude';
-              break;
-            case 'codex':
-              agentCommand = 'codex';
-              break;
-            case 'gemini':
-              agentCommand = 'gemini';
-              break;
-            case 'openclaw':
-              agentCommand = 'openclaw';
-              break;
-            case 'pi':
-              agentCommand = 'pi';
-              break;
-            default:
-              return {
-                type: 'error',
-                errorMessage: `Unsupported agent type: '${options.agent}'. Please update your CLI to the latest version.`
-              };
+          if (agent === 'pi') {
+            const err = 'tmux is required for pi but is not available';
+            logger.debug(`[DAEMON RUN] ${err}`);
+            return { type: 'error', errorMessage: err };
           }
+
           const args = [
-            agentCommand,
+            agent,
             '--happy-starting-mode', 'remote',
             '--started-by', 'daemon'
           ];
@@ -484,17 +504,20 @@ export async function startDaemon(): Promise<void> {
           // resumeClaudeSessionId attaches the new Happy session to a pre-existing
           // Claude conversation file (used by the fork / duplicate flow). We pass
           // it through `--resume <id>` as Happy's existing pass-through to claude.
-          if (options.resumeClaudeSessionId && agentCommand === 'claude') {
+          if (options.resumeClaudeSessionId && agent === 'claude') {
             args.push('--resume', options.resumeClaudeSessionId);
           }
 
           // TODO: In future, sessionId could be used with --resume to continue existing sessions
           // For now, we ignore it - each spawn creates a new session
+
           return spawnTrackedHappyProcess({
             args,
             cwd: directory,
             env: {
               ...process.env,
+              PI_MODEL: 'kimi-k2.6',
+              HAPPY_STARTED_BY: 'daemon',
               ...extraEnv
             },
             directoryCreated,

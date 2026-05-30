@@ -9,6 +9,9 @@ export type PiHappyMetadataPatch = {
   tools: string[];
   slashCommands: string[];
   currentModelCode?: string;
+  startedBy?: string;
+  startedFromDaemon?: boolean;
+  hostPid?: number;
 };
 
 export function collectMetadataPatch(
@@ -18,7 +21,10 @@ export function collectMetadataPatch(
   return {
     tools: pi.getAllTools().map(tool => tool.name),
     slashCommands: pi.getCommands().map(command => command.name),
-    currentModelCode: ctx.model?.name,
+    currentModelCode: process.env.PI_MODEL || ctx.model?.name,
+    startedBy: process.env.HAPPY_STARTED_BY || 'terminal',
+    startedFromDaemon: process.env.HAPPY_STARTED_BY === 'daemon',
+    hostPid: process.pid,
   };
 }
 

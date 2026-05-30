@@ -556,7 +556,7 @@ export default function piHappyExtension(pi: PiExtensionApiLike): void {
     if (msg && typeof msg === 'object' && (msg as { role?: unknown }).role === 'user') {
       const text = (msg as { content?: unknown[] }).content
         ?.filter((c): c is { type: string; text?: string } => typeof c === 'object' && c !== null)
-        ?.filter(c => c.type === 'text' && typeof c.text === 'string')
+        ?.filter((c): c is { type: string; text: string } => c.type === 'text' && typeof c.text === 'string')
         ?.map(c => c.text)
         ?.join('') || '';
       if (text.length > 0) {
@@ -565,7 +565,7 @@ export default function piHappyExtension(pi: PiExtensionApiLike): void {
 
         // Auto-title on the first user message if the session has no summary yet
         if (runtime.userMessageCount === 1 && runtime.client) {
-          const currentSummary = runtime.client.getMetadata().summary;
+          const currentSummary = runtime.client.getMetadata().summary as { text?: string } | undefined;
           if (!currentSummary?.text) {
             const title = generateSessionTitle(text);
             if (title) {

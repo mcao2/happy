@@ -1,3 +1,4 @@
+import { once } from 'node:events';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -236,7 +237,6 @@ export class MockDaemonServer {
     }
 
     const { createServer } = await import('node:http');
-    const { once } = await import('node:events');
 
     this.server = createServer(async (req, res) => {
       if (req.method === 'POST' && req.url === '/session-started') {
