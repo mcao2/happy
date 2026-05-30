@@ -117,6 +117,9 @@ export function getHardcodedPermissionModes(flavor: AgentFlavor, translate: Tran
     if (flavor === 'openclaw') {
         return getOpenClawPermissionModes(translate);
     }
+    if (flavor === 'pi') {
+        return getClaudePermissionModes(translate);
+    }
     return getClaudePermissionModes(translate);
 }
 
@@ -135,6 +138,9 @@ export function getHardcodedModelModes(flavor: AgentFlavor, _translate: Translat
     }
     if (flavor === 'openclaw') {
         return getOpenClawModelModes();
+    }
+    if (flavor === 'pi') {
+        return getClaudeModelModes();
     }
     return getClaudeModelModes();
 }
@@ -221,6 +227,7 @@ export function getCodexEffortLevels(): EffortLevel[] {
 
 export function getHardcodedEffortLevels(flavor: AgentFlavor): EffortLevel[] {
     if (flavor === 'claude') return getClaudeEffortLevels();
+    if (flavor === 'pi') return getClaudeEffortLevels();
     if (flavor === 'codex') return getCodexEffortLevels();
     return [];
 }
@@ -236,6 +243,9 @@ export function getEffortLevelsForModel(flavor: AgentFlavor, _modelKey: string):
     // to the whole flavor (mirrors how Codex already worked, which the user
     // asked Claude to match).
     if (flavor === 'claude') {
+        return getClaudeEffortLevels();
+    }
+    if (flavor === 'pi') {
         return getClaudeEffortLevels();
     }
     if (flavor === 'codex') {

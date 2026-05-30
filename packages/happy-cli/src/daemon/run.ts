@@ -361,8 +361,8 @@ export async function startDaemon(): Promise<void> {
 
           // Construct command for the CLI
           const cliPath = join(projectPath(), 'dist', 'index.mjs');
-          // Determine agent command - support claude, codex, and gemini
-          const agent = options.agent === 'gemini' ? 'gemini' : (options.agent === 'codex' ? 'codex' : (options.agent === 'openclaw' ? 'openclaw' : 'claude'));
+          // Determine agent command - support claude, codex, gemini, openclaw, and pi
+          const agent = options.agent === 'pi' ? 'pi' : (options.agent === 'gemini' ? 'gemini' : (options.agent === 'codex' ? 'codex' : (options.agent === 'openclaw' ? 'openclaw' : 'claude')));
           // Restrict resume to Claude — Codex/Gemini don't honour the
           // happy-pass-through `--resume <id>` argument the same way.
           const resumeFragment = options.resumeClaudeSessionId && agent === 'claude'
@@ -450,7 +450,7 @@ export async function startDaemon(): Promise<void> {
         if (!useTmux) {
           logger.debug(`[DAEMON RUN] Using regular process spawning`);
 
-          // Construct arguments for the CLI - support claude, codex, and gemini
+          // Construct arguments for the CLI - support claude, codex, gemini, openclaw, and pi
           let agentCommand: string;
           switch (options.agent) {
             case 'claude':
@@ -465,6 +465,9 @@ export async function startDaemon(): Promise<void> {
               break;
             case 'openclaw':
               agentCommand = 'openclaw';
+              break;
+            case 'pi':
+              agentCommand = 'pi';
               break;
             default:
               return {

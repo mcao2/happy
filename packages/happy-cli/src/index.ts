@@ -439,6 +439,27 @@ Conversation history is preserved on the server, but in-flight tool calls are in
       process.exit(1)
     }
     return;
+  } else if (subcommand === 'pi') {
+    try {
+      const { spawn } = require('child_process');
+      const piArgs: string[] = [];
+      for (let i = 1; i < args.length; i++) {
+        if (args[i] === '--started-by') { i++; continue; }
+        if (args[i] === '--happy-starting-mode') { i++; continue; }
+        if (args[i] === '--happy-session-id') { i++; continue; }
+        if (args[i] === '--resume') { continue; }
+        piArgs.push(args[i]);
+      }
+      const child = spawn('pi', piArgs, { stdio: 'inherit', cwd: process.cwd() });
+      child.on('exit', (code: number | null) => process.exit(code ?? 0));
+    } catch (error) {
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error');
+      if (process.env.DEBUG) {
+        console.error(error);
+      }
+      process.exit(1);
+    }
+    return;
   } else if (subcommand === 'logout') {
     // Keep for backward compatibility - redirect to auth logout
     console.log(chalk.yellow('Note: "happy logout" is deprecated. Use "happy auth logout" instead.\n'));
