@@ -28,6 +28,8 @@ import { detectCLIAvailability } from '@/utils/detectCLI';
 import { buildResumeLaunch } from '@/resume/handleResumeCommand';
 import { detectResumeSupport } from '@/resume/localHappyAgentAuth';
 import { encodeBase64, decodeBase64, decrypt } from '@/api/encryption';
+import { resolveHappySession } from '@/resume/resolveHappySession';
+import { onHappySessionWebhook as trackHappySessionWebhook, stopTrackedSession } from './sessionTracking';
 
 /** Shell-escape a string for safe interpolation into tmux commands. */
 function shellescape(s: string): string {
@@ -188,17 +190,6 @@ export async function startDaemon(): Promise<void> {
 
     // Handle webhook from happy session reporting itself
     const onHappySessionWebhook = (sessionId: string, sessionMetadata: Metadata, encryption?: SessionEncryptionData) => {
-      logger.debugLargeJson(`[DAEMON RUN] Session reported`, sessionMetadata);
-
-      const pid = sessionMetadata.hostPid;
-      if (!pid) {
-        logger.debug(`[DAEMON RUN] Session webhook missing hostPid for sessionId: ${sessionId}`);
-        return;
-      }
-
-      logger.debug(`[DAEMON RUN] Session webhook: ${sessionId}, PID: ${pid}, started by: ${sessionMetadata.startedBy || 'unknown'}, hasEncryption: ${!!encryption}`);
-      logger.debug(`[DAEMON RUN] Current tracked sessions before webhook: ${Array.from(pidToTrackedSession.keys()).join(', ')}`);
-
       // Persist encryption data to disk so it survives daemon restarts
       if (encryption) {
         persistSession(sessionId, {
@@ -212,35 +203,7 @@ export async function startDaemon(): Promise<void> {
         });
       }
 
-      // Check if we already have this PID (daemon-spawned)
-      const existingSession = pidToTrackedSession.get(pid);
-
-      if (existingSession && existingSession.startedBy === 'daemon') {
-        // Update daemon-spawned session with reported data
-        existingSession.happySessionId = sessionId;
-        existingSession.happySessionMetadataFromLocalWebhook = sessionMetadata;
-        existingSession.encryption = encryption;
-        logger.debug(`[DAEMON RUN] Updated daemon-spawned session ${sessionId} with metadata`);
-
-        // Resolve any awaiter for this PID
-        const awaiter = pidToAwaiter.get(pid);
-        if (awaiter) {
-          pidToAwaiter.delete(pid);
-          awaiter(existingSession);
-          logger.debug(`[DAEMON RUN] Resolved session awaiter for PID ${pid}`);
-        }
-      } else if (!existingSession) {
-        // New session started externally
-        const trackedSession: TrackedSession = {
-          startedBy: 'happy directly - likely by user from terminal',
-          happySessionId: sessionId,
-          happySessionMetadataFromLocalWebhook: sessionMetadata,
-          encryption,
-          pid
-        };
-        pidToTrackedSession.set(pid, trackedSession);
-        logger.debug(`[DAEMON RUN] Registered externally-started session ${sessionId}`);
-      }
+      trackHappySessionWebhook(pidToTrackedSession, pidToAwaiter, sessionId, sessionMetadata);
     };
 
     // Spawn a new session (sessionId reserved for future --resume functionality)
@@ -718,38 +681,7 @@ export async function startDaemon(): Promise<void> {
 
     // Stop a session by sessionId or PID fallback
     const stopSession = (sessionId: string): boolean => {
-      logger.debug(`[DAEMON RUN] Attempting to stop session ${sessionId}`);
-
-      // Try to find by sessionId first
-      for (const [pid, session] of pidToTrackedSession.entries()) {
-        if (session.happySessionId === sessionId ||
-          (sessionId.startsWith('PID-') && pid === parseInt(sessionId.replace('PID-', '')))) {
-
-          if (session.startedBy === 'daemon' && session.childProcess) {
-            try {
-              session.childProcess.kill('SIGTERM');
-              logger.debug(`[DAEMON RUN] Sent SIGTERM to daemon-spawned session ${sessionId}`);
-            } catch (error) {
-              logger.debug(`[DAEMON RUN] Failed to kill session ${sessionId}:`, error);
-            }
-          } else {
-            // For externally started sessions, try to kill by PID
-            try {
-              process.kill(pid, 'SIGTERM');
-              logger.debug(`[DAEMON RUN] Sent SIGTERM to external session PID ${pid}`);
-            } catch (error) {
-              logger.debug(`[DAEMON RUN] Failed to kill external session PID ${pid}:`, error);
-            }
-          }
-
-          pidToTrackedSession.delete(pid);
-          logger.debug(`[DAEMON RUN] Removed session ${sessionId} from tracking`);
-          return true;
-        }
-      }
-
-      logger.debug(`[DAEMON RUN] Session ${sessionId} not found`);
-      return false;
+      return stopTrackedSession(pidToTrackedSession, sessionId);
     };
 
     // Handle child process exit — preserve session data for resume

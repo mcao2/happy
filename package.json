@@ -32,7 +32,17 @@
             "packages/happy-server",
             "packages/happy-wire",
             "packages/happy-app-logs",
-            "packages/codium"
+            "packages/codium",
+            "packages/pi-happy"
+        ],
+        "nohoist": [
+            "**/zod",
+            "**/react",
+            "**/react-dom",
+            "**/react-native",
+            "**/react-native/**",
+            "**/react-native-edge-to-edge/**",
+            "**/react-native-incall-manager/**"
         ]
     },
     "pnpm": {
