@@ -64,6 +64,7 @@ type BridgeRuntime = PiHappyRuntimeSession & {
   notifiedSessionIds: Set<string>;
   disabled: boolean;
   lastCtx: PiHappyExtensionContext | null;
+  suppressUserForward: boolean;
 };
 
 function createRuntime(): BridgeRuntime {
@@ -82,6 +83,7 @@ function createRuntime(): BridgeRuntime {
     notifiedSessionIds: new Set<string>(),
     disabled: false,
     lastCtx: null,
+    suppressUserForward: false,
   };
 }
 
@@ -324,11 +326,15 @@ async function handleSessionStart(
   });
 
   registerInboundMessageBridge(client, pi, ctx, {
+    onBeforeSend: () => {
+      runtime.suppressUserForward = true;
+    },
     onSuccess: () => {
       clearFailures(runtime);
       runtime.uiManager?.recordReceived();
     },
     onError: error => {
+      runtime.suppressUserForward = false;
       recordFailure(runtime, 'client.userMessage', error);
     },
   });
@@ -529,6 +535,33 @@ export default function piHappyExtension(pi: PiExtensionApiLike): void {
     if (hasStringDelta(assistantEvent, 'thinking_delta')) {
       sendEnvelopes(runtime, runtime.mapper.mapThinkingDelta(assistantEvent.delta));
     }
+  });
+
+  registerSafeHandler('message_start', async (event, _ctx) => {
+    if (!runtime.mapper) {
+      return;
+    }
+
+    if (runtime.suppressUserForward) {
+      runtime.suppressUserForward = false;
+      return;
+    }
+
+    const msg = event.message;
+    if (msg && typeof msg === 'object' && (msg as { role?: unknown }).role === 'user') {
+      const text = (msg as { content?: unknown[] }).content
+        ?.filter((c): c is { type: string; text?: string } => typeof c === 'object' && c !== null)
+        ?.filter(c => c.type === 'text' && typeof c.text === 'string')
+        ?.map(c => c.text)
+        ?.join('') || '';
+      if (text.length > 0) {
+        sendEnvelopes(runtime, runtime.mapper.mapUserMessage(text));
+      }
+    }
+  });
+
+  registerSafeHandler('message_end', async (_event, _ctx) => {
+    // No-op — turn_end handles boundaries
   });
 
   // ---------------------------------------------------------------------------

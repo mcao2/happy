@@ -77,6 +77,16 @@ export type PiHappyAssistantMessageEvent =
   | { type: 'thinking_delta'; delta: string }
   | { type: string; [key: string]: unknown };
 
+export interface PiHappyMessageStartEvent {
+  type?: 'message_start';
+  message: unknown;
+}
+
+export interface PiHappyMessageEndEvent {
+  type?: 'message_end';
+  message: unknown;
+}
+
 export interface PiHappyMessageUpdateEvent {
   type?: 'message_update';
   message?: unknown;
@@ -119,6 +129,8 @@ export interface PiHappyEventMap {
   agent_end: PiHappyAgentEndEvent;
   turn_start: PiHappyTurnStartEvent;
   turn_end: PiHappyTurnEndEvent;
+  message_start: PiHappyMessageStartEvent;
+  message_end: PiHappyMessageEndEvent;
   message_update: PiHappyMessageUpdateEvent;
   tool_execution_start: PiHappyToolExecutionStartEvent;
   tool_execution_end: PiHappyToolExecutionEndEvent;

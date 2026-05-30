@@ -137,6 +137,15 @@ export class PiSessionMapper {
     ];
   }
 
+  mapUserMessage(text: string): SessionEnvelope[] {
+    if (!text) {
+      return [];
+    }
+    return [
+      createEnvelope('agent', { t: 'text', text }, { time: this.nextTime() }),
+    ];
+  }
+
   flush(): SessionEnvelope[] {
     if (!this.pendingText || !this.pendingType) {
       return [];

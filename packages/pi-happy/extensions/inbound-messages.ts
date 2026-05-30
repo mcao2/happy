@@ -15,17 +15,21 @@ export function extractInboundUserText(message: UserMessage): string | null {
 export type InboundMessageBridgeOptions = {
   onSuccess?: () => void;
   onError?: (error: unknown) => void;
+  onBeforeSend?: (text: string) => void;
 };
 
 export function bridgeInboundUserMessage(
   message: UserMessage,
   pi: Pick<PiExtensionApiLike, 'sendUserMessage'>,
   ctx: Pick<PiHappyExtensionContext, 'hasUI' | 'isIdle' | 'ui'>,
+  options?: InboundMessageBridgeOptions,
 ): void {
   const text = extractInboundUserText(message);
   if (!text) {
     return;
   }
+
+  options?.onBeforeSend?.(text);
 
   if (ctx.isIdle()) {
     pi.sendUserMessage(text);
@@ -46,7 +50,7 @@ export function registerInboundMessageBridge(
 ): void {
   client.onUserMessage(message => {
     try {
-      bridgeInboundUserMessage(message, pi, ctx);
+      bridgeInboundUserMessage(message, pi, ctx, options);
       options.onSuccess?.();
     } catch (error) {
       options.onError?.(error);
