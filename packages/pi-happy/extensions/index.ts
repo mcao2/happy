@@ -16,6 +16,7 @@ import { loadSettings } from './settings';
 import {
   buildInitialAgentState,
   buildSessionMetadata,
+  generateSessionTitle,
   notifyDaemonSessionStarted,
   startKeepAliveLoop,
   stopKeepAliveLoop,
@@ -65,6 +66,7 @@ type BridgeRuntime = PiHappyRuntimeSession & {
   disabled: boolean;
   lastCtx: PiHappyExtensionContext | null;
   suppressUserForward: boolean;
+  userMessageCount: number;
 };
 
 function createRuntime(): BridgeRuntime {
@@ -84,6 +86,7 @@ function createRuntime(): BridgeRuntime {
     disabled: false,
     lastCtx: null,
     suppressUserForward: false,
+    userMessageCount: 0,
   };
 }
 
@@ -203,6 +206,7 @@ async function shutdownActiveSession(runtime: BridgeRuntime, ctx?: PiHappyExtens
   runtime.client = null;
   runtime.mapper = null;
   runtime.thinking = false;
+  runtime.userMessageCount = 0;
 
   if (!client) {
     runtime.uiManager?.detach();
@@ -435,6 +439,7 @@ export default function piHappyExtension(pi: PiExtensionApiLike): void {
 
       await handleConnectCommand(buildConnectDeps(ctx), ctx);
       runtime.mapper = new PiSessionMapper();
+      runtime.userMessageCount = 0;
     },
   });
 
@@ -555,7 +560,22 @@ export default function piHappyExtension(pi: PiExtensionApiLike): void {
         ?.map(c => c.text)
         ?.join('') || '';
       if (text.length > 0) {
+        runtime.userMessageCount += 1;
         sendEnvelopes(runtime, runtime.mapper.mapUserMessage(text));
+
+        // Auto-title on the first user message if the session has no summary yet
+        if (runtime.userMessageCount === 1 && runtime.client) {
+          const currentSummary = runtime.client.getMetadata().summary;
+          if (!currentSummary?.text) {
+            const title = generateSessionTitle(text);
+            if (title) {
+              await runtime.client.updateMetadata(meta => ({
+                ...meta,
+                summary: { text: title, updatedAt: Date.now() },
+              }));
+            }
+          }
+        }
       }
     }
   });

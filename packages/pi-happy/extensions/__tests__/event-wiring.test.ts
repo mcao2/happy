@@ -541,4 +541,76 @@ describe('pi-happy event wiring', () => {
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toEqual([PI_HAPPY_SYNC_FAILING_NOTIFICATION, 'warning']);
   });
+
+  it('auto-titles the session from the first user message when no summary exists', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'pi-happy-auto-title-'));
+    tempDirs.push(tempDir);
+
+    mockLoadConfig.mockReturnValue({
+      serverUrl: 'https://server.test',
+      happyHomeDir: tempDir,
+      privateKeyFile: join(tempDir, 'access.key'),
+      settingsFile: join(tempDir, 'settings.json'),
+      daemonStateFile: join(tempDir, 'daemon.state.json'),
+    });
+
+    const client = new FakeSessionClient('session-123', ConnectionState.Connected, { flavor: 'pi' });
+    mockCreateWithOfflineFallback.mockResolvedValue(client);
+
+    const { pi, handlers } = createPiApiStub();
+    const ctx = createContext();
+
+    piHappyExtension(pi);
+    await handlers.session_start?.({}, ctx);
+
+    // Simulate first user message
+    await handlers.message_start?.({
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'Fix the login bug in auth.ts' }],
+      },
+    }, ctx);
+
+    expect(client.updateMetadata).toHaveBeenCalledTimes(1);
+    expect(client.getMetadata()).toMatchObject({
+      summary: { text: 'Fix the login bug in auth.ts' },
+    });
+  });
+
+  it('does not overwrite an existing summary on subsequent user messages', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'pi-happy-existing-title-'));
+    tempDirs.push(tempDir);
+
+    mockLoadConfig.mockReturnValue({
+      serverUrl: 'https://server.test',
+      happyHomeDir: tempDir,
+      privateKeyFile: join(tempDir, 'access.key'),
+      settingsFile: join(tempDir, 'settings.json'),
+      daemonStateFile: join(tempDir, 'daemon.state.json'),
+    });
+
+    const client = new FakeSessionClient('session-123', ConnectionState.Connected, {
+      flavor: 'pi',
+      summary: { text: 'Original title', updatedAt: 1 },
+    });
+    mockCreateWithOfflineFallback.mockResolvedValue(client);
+
+    const { pi, handlers } = createPiApiStub();
+    const ctx = createContext();
+
+    piHappyExtension(pi);
+    await handlers.session_start?.({}, ctx);
+
+    await handlers.message_start?.({
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'A completely different topic' }],
+      },
+    }, ctx);
+
+    // updateMetadata should NOT be called for title purposes when summary already exists
+    expect(client.getMetadata()).toMatchObject({
+      summary: { text: 'Original title' },
+    });
+  });
 });

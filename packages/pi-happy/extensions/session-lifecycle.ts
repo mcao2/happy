@@ -19,6 +19,32 @@ export type PiHappyRuntimeSession = {
   thinking: boolean;
 };
 
+export function generateSessionTitle(text: string): string {
+  const lines = text.split('\n');
+
+  for (const rawLine of lines) {
+    let cleaned = rawLine
+      .replace(/^#{1,6}\s+/, '')      // markdown headings
+      .replace(/^>\s*/, '')           // blockquotes
+      .replace(/^[-*]\s+/, '')        // unordered list
+      .replace(/^\d+\.\s+/, '')       // ordered list
+      .replace(/^```\w*/, '')         // opening code fence
+      .replace(/^`+/, '')             // inline code start
+      .replace(/`+$/, '')             // inline code end
+      .trim();
+
+    if (cleaned.length > 0) {
+      const MAX_LENGTH = 50;
+      if (cleaned.length > MAX_LENGTH) {
+        cleaned = cleaned.slice(0, MAX_LENGTH - 1) + '\u2026';
+      }
+      return cleaned;
+    }
+  }
+
+  return '';
+}
+
 export function buildInitialAgentState(): HappySessionAgentState {
   return {
     controlledByUser: false,
