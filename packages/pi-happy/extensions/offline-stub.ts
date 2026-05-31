@@ -14,6 +14,8 @@ export interface HappySessionClientLike {
   on(eventName: 'connectionState', listener: (state: ConnectionState) => void): this;
   on(eventName: 'message', listener: (message: unknown) => void): this;
   on(eventName: 'error', listener: (error: unknown) => void): this;
+  on(eventName: 'archived', listener: () => void): this;
+  on(eventName: 'ephemeral', listener: (data: { type: 'activity', id: string, active: boolean, activeAt: number, thinking: boolean }) => void): this;
   getMetadata(): HappySessionMetadata;
   getAgentState(): HappySessionAgentState | null;
   getConnectionState(): ConnectionState;
@@ -161,6 +163,14 @@ export class OfflineHappySessionStub extends EventEmitter implements HappySessio
 
     client.on('error', error => {
       this.emit('error', error);
+    });
+
+    client.on('archived', () => {
+      this.emit('archived');
+    });
+
+    client.on('ephemeral', data => {
+      this.emit('ephemeral', data);
     });
 
     const currentState = client.getConnectionState();

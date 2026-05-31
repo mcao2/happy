@@ -375,12 +375,14 @@ export function sessionRoutes(app: Fastify) {
             return reply.code(404).send({ error: 'Session not found' });
         }
 
-        // Notify all clients about the session deactivation
+        // Notify all clients about the session deactivation.
+        // Use 'all-interested-in-session' so session-scoped connections
+        // (e.g. pi-happy) receive the signal, not just user-scoped ones.
         const sessionActivity = buildSessionActivityEphemeral(sessionId, false, Date.now(), false);
         eventRouter.emitEphemeral({
             userId,
             payload: sessionActivity,
-            recipientFilter: { type: 'user-scoped-only' }
+            recipientFilter: { type: 'all-interested-in-session', sessionId }
         });
 
         return reply.send({ success: true });

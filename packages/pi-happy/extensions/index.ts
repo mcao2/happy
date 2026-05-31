@@ -329,6 +329,13 @@ async function handleSessionStart(
     }, { clearOnSuccess: false });
   });
 
+  client.on('archived', () => {
+    void executeSafely(runtime, ctx, 'client.archived', () => {
+      logger.info('Session archived from web/mobile, shutting down...');
+      void shutdownActiveSession(runtime, runtime.lastCtx ?? ctx);
+    }, { clearOnSuccess: false });
+  });
+
   registerInboundMessageBridge(client, pi, ctx, {
     onBeforeSend: () => {
       runtime.suppressUserForward = true;

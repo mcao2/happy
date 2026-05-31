@@ -369,6 +369,28 @@ describe('HappySessionClient', () => {
     await client.close();
   });
 
+  it('retains outbox messages when the server POST fails so backoff can retry', async () => {
+    const client = new HappySessionClient(makeLegacyCredentials(), 'https://server.test', makeSession(), {
+      cwd: '/tmp/project',
+    });
+
+    (client as any).pendingOutbox = [
+      { content: 'encrypted-a', localId: 'local-a' },
+      { content: 'encrypted-b', localId: 'local-b' },
+    ];
+
+    mockAxiosPost.mockRejectedValueOnce(new Error('network blip'));
+
+    await expect((client as any).flushOutbox()).rejects.toThrow('network blip');
+    expect(mockAxiosPost).toHaveBeenCalledTimes(1);
+    expect(mockAxiosPost.mock.calls[0][1].messages).toHaveLength(2);
+    expect((client as any).pendingOutbox).toHaveLength(2);
+    expect((client as any).pendingOutbox[0].localId).toBe('local-a');
+    expect((client as any).pendingOutbox[1].localId).toBe('local-b');
+
+    await client.close();
+  });
+
   it('emits keepalive pings over the socket', async () => {
     const client = new HappySessionClient(makeLegacyCredentials(), 'https://server.test', makeSession(), {
       cwd: '/tmp/project',

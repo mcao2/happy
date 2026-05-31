@@ -103,6 +103,7 @@ type UpdateStateAck =
 type ServerToClientEvents = {
   update: (data: Update) => void;
   'rpc-request': (data: { method: string; params: string }, callback: (response: string) => void) => void;
+  ephemeral: (data: { type: 'activity'; id: string; active: boolean; activeAt: number; thinking: boolean }) => void;
   error: (data: { message: string }) => void;
 };
 
@@ -659,6 +660,13 @@ export class HappySessionClient extends EventEmitter implements HappySessionClie
               this.metadata,
             );
             this.metadataVersion = data.body.metadata.version;
+
+            // iOS archive → server sends lifecycleState='archived' → exit
+            const meta = this.metadata as any;
+            if (meta?.lifecycleState === 'archiveRequested' || meta?.lifecycleState === 'archived') {
+              logger.debug('[HappySessionClient] Session archived from web/mobile, exiting...');
+              this.emit('archived');
+            }
           }
           if (data.body.agentState && data.body.agentState.version > this.agentStateVersion) {
             this.agentState = decryptCreatedAgentState(
@@ -675,6 +683,13 @@ export class HappySessionClient extends EventEmitter implements HappySessionClie
         this.emit('message', data.body);
       } catch (error) {
         logger.debug('[HappySessionClient] failed to handle update', error);
+      }
+    });
+
+    this.socket.on('ephemeral', data => {
+      if (data.type === 'activity' && data.id === this.sessionId && !data.active) {
+        logger.debug('[HappySessionClient] Session deactivated from web/mobile, exiting...');
+        this.emit('archived');
       }
     });
 
@@ -773,7 +788,8 @@ export class HappySessionClient extends EventEmitter implements HappySessionClie
   private async flushOutbox(): Promise<void> {
     while (this.pendingOutbox.length > 0) {
       const batchSize = Math.min(this.pendingOutbox.length, HappySessionClient.MAX_OUTBOX_BATCH_SIZE);
-      const batch = this.pendingOutbox.splice(-batchSize, batchSize);
+      const batchStart = this.pendingOutbox.length - batchSize;
+      const batch = this.pendingOutbox.slice(batchStart);
 
       const response = await axios.post<V3PostSessionMessagesResponse>(
         `${this.serverUrl}/v3/sessions/${encodeURIComponent(this.sessionId)}/messages`,
@@ -787,6 +803,7 @@ export class HappySessionClient extends EventEmitter implements HappySessionClie
       const messages = Array.isArray(response.data.messages) ? response.data.messages : [];
       const maxSeq = messages.reduce((highest, message) => Math.max(highest, message.seq), this.lastSeq);
       this.lastSeq = maxSeq;
+      this.pendingOutbox.splice(batchStart, batch.length);
     }
   }
 
