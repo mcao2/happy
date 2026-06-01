@@ -39,6 +39,14 @@ describe('loadConfig', () => {
     });
   });
 
+  it('strips trailing slashes from HAPPY_SERVER_URL', () => {
+    process.env.HAPPY_SERVER_URL = 'https://staging.cluster-fluster.com/';
+
+    const config = loadConfig();
+
+    expect(config.serverUrl).toBe('https://staging.cluster-fluster.com');
+  });
+
   it('resolves HAPPY_SERVER_URL and expands a leading ~ in HAPPY_HOME_DIR', () => {
     process.env.HAPPY_SERVER_URL = 'https://staging.cluster-fluster.com';
     process.env.HAPPY_HOME_DIR = '~/Library/Application Support/happy';

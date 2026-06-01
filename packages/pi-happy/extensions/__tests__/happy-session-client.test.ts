@@ -554,4 +554,48 @@ describe('HappySessionClient', () => {
 
     await client.close();
   });
+
+  it('suppresses error emission for retryable connect_errors (404 and network failures)', async () => {
+    const client = new HappySessionClient(makeLegacyCredentials(), 'https://server.test', makeSession(), {
+      cwd: '/tmp/project',
+    });
+
+    const errors: Error[] = [];
+    client.on('error', (err: Error) => errors.push(err));
+
+    // TransportError wrapping a 404-like ws error
+    socketControl.emit('connect_error', {
+      message: 'websocket error',
+      description: { message: 'Unexpected server response: 404' },
+      type: 'TransportError',
+    });
+
+    // TransportError wrapping a network error
+    socketControl.emit('connect_error', {
+      message: 'websocket error',
+      description: { message: 'connect ECONNREFUSED 127.0.0.1:9999' },
+      type: 'TransportError',
+    });
+
+    expect(errors).toHaveLength(0);
+    expect(client.getConnectionState()).toBe(ConnectionState.Disconnected);
+
+    await client.close();
+  });
+
+  it('emits error for non-retryable connect_errors', async () => {
+    const client = new HappySessionClient(makeLegacyCredentials(), 'https://server.test', makeSession(), {
+      cwd: '/tmp/project',
+    });
+
+    const errors: Error[] = [];
+    client.on('error', (err: Error) => errors.push(err));
+
+    socketControl.emit('connect_error', new Error('Invalid authentication token'));
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('Invalid authentication token');
+
+    await client.close();
+  });
 });

@@ -17,7 +17,7 @@ export function loadConfig(): PiHappyConfig {
   const happyHomeDir = resolveHappyHomeDir();
 
   return {
-    serverUrl: process.env.HAPPY_SERVER_URL || DEFAULT_HAPPY_SERVER_URL,
+    serverUrl: (process.env.HAPPY_SERVER_URL || DEFAULT_HAPPY_SERVER_URL).replace(/\/+$/, ''),
     happyHomeDir,
     privateKeyFile: join(happyHomeDir, 'access.key'),
     settingsFile: join(happyHomeDir, 'settings.json'),

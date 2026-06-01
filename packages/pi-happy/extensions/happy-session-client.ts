@@ -148,6 +148,42 @@ function isNetworkError(error: unknown): boolean {
   return typeof code === 'string' && NETWORK_ERROR_CODES.has(code);
 }
 
+function isRetryableConnectError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  // engine.io-client wraps transport errors in a TransportError where the
+  // original ws/HTTP error lives in .description (either an ErrorEvent or
+  // a plain Error). Check that first.
+  const description = 'description' in error ? (error as { description?: unknown }).description : undefined;
+  if (description) {
+    const descMessage = typeof description === 'object' && description !== null && 'message' in description
+      ? String((description as { message?: unknown }).message)
+      : String(description);
+    if (descMessage.includes('Unexpected server response')) {
+      return true;
+    }
+    for (const code of NETWORK_ERROR_CODES) {
+      if (descMessage.includes(code)) {
+        return true;
+      }
+    }
+  }
+
+  // Fall back to top-level fields for other error shapes.
+  const message = 'message' in error ? String((error as { message?: unknown }).message) : '';
+  if (message.includes('Unexpected server response')) {
+    return true;
+  }
+  const code = 'code' in error ? (error as { code?: unknown }).code : undefined;
+  if (typeof code === 'string' && NETWORK_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  return false;
+}
+
 function isOfflineCreateError(error: unknown): boolean {
   if (isNetworkError(error)) {
     return true;
@@ -289,7 +325,7 @@ export class HappySessionClient extends EventEmitter implements HappySessionClie
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
       withCredentials: true,
       autoConnect: false,
     });
@@ -622,7 +658,11 @@ export class HappySessionClient extends EventEmitter implements HappySessionClie
       logger.debug('[HappySessionClient] socket connect_error', error);
       this.rpcHandlerManager.onSocketDisconnect();
       this.setConnectionState(ConnectionState.Disconnected);
-      this.emit('error', error);
+      // Suppress emitting retryable transport errors; Socket.IO will retry automatically.
+      // 404 from upstream proxies and network-level failures are transient.
+      if (!isRetryableConnectError(error)) {
+        this.emit('error', error);
+      }
     });
 
     this.socket.on('update', data => {
